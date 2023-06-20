@@ -1,0 +1,144 @@
+<DOCTYPE html>
+	<html>
+	<head>
+		<title>Google Authenticator QR Code Reader</title>
+		<script src="https://cdn.jsdelivr.net/npm/protobufjs@7.2.3/dist/protobuf.min.js"></script>
+		<style type="text/css">
+			#qrOutput
+			{
+				width: 80vw;
+				line-break: anywhere;
+				border: 1px solid #999999;
+				padding: 8px;
+				box-sizing: border-box;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Google Authenticator QR Code Reader</h1>
+		<p id="videoPara">
+			<input type="button" value="Scan QR Code" onclick="toggleQrScan()" />
+			<br />
+			<video id="qrVideo" style="display:none"></video>
+		</p>
+		<p id="qrOutput"></p>
+		<p id="output" style="white-space:pre-wrap"></p>
+		<script>
+			function base32Encode(bytes)
+			{
+				const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+				let bits = 0;
+				let value = 0;
+				let output = '';
+
+				for (const byte of bytes)
+				{
+					value = (value << 8) | byte;
+					bits += 8;
+
+					while (bits >= 5)
+					{
+						output += alphabet[(value >>> (bits - 5)) & 31];
+						bits -= 5;
+					}
+				}
+
+				if (bits > 0)
+				{
+					output += alphabet[(value << (5 - bits)) & 31];
+				}
+
+				return output;
+			}
+			function base64ToUint8Array(base64String)
+			{
+				const binaryString = window.atob(base64String);
+				const len = binaryString.length;
+				const bytes = new Uint8Array(len);
+				for (let i = 0; i < len; i++)
+				{
+					bytes[i] = binaryString.charCodeAt(i);
+				}
+				return bytes;
+			}
+
+		</script>
+		<script type="module">
+			import QrScanner from 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/+esm';
+
+			var qrScanner = null;
+			window.toggleQrScan = function ()
+			{
+				if (qrScanner)
+				{
+					qrScanner.stop();
+					qrScanner = null;
+					document.getElementById("qrVideo").style.display = "none";
+				}
+				else
+				{
+					qrScanner = new QrScanner(document.getElementById("qrVideo"), function (result)
+					{
+						document.getElementById("qrOutput").innerText = "QR Code URL: " + result;
+						importCode(result);
+						window.toggleQrScan();
+					});
+					document.getElementById("qrVideo").style.display = "block";
+					qrScanner.start();
+				}
+			}
+
+			const root = new protobuf.Root();
+
+			const MigrationPayload = new protobuf.Type("MigrationPayload")
+				.add(new protobuf.Field("otp_parameters", 1, "OTPParameters", "repeated"))
+				.add(new protobuf.Field("version", 2, "int32"));
+
+			const OTPParameters = new protobuf.Type("OTPParameters")
+				.add(new protobuf.Field("secret", 1, "bytes"))
+				.add(new protobuf.Field("name", 2, "string"))
+				.add(new protobuf.Field("issuer", 3, "string"))
+				.add(new protobuf.Field("algorithm", 4, "Algorithm"))
+				.add(new protobuf.Field("digits", 5, "int32"))
+				.add(new protobuf.Field("counter", 6, "uint64"))
+				.add(new protobuf.Field("type", 7, "Type"));
+
+			const Algorithm = new protobuf.Enum("Algorithm", {
+				SHA1: 0,
+				SHA256: 1,
+				SHA512: 2,
+			});
+
+			const Type = new protobuf.Enum("Type", {
+				HOTP: 0,
+				TOTP: 1,
+			});
+
+			root.add(Algorithm);
+			root.add(Type);
+			root.add(OTPParameters);
+			root.add(MigrationPayload);
+
+			function importCode(url)
+			{
+				console.log("importCode", url);
+				let data = new URL(url).searchParams.get("data");
+				if (!data)
+				{
+					alert("Unrecognized QR Code");
+					return;
+				}
+
+				let payload = MigrationPayload.decode(base64ToUint8Array(data));
+
+				payload = JSON.parse(JSON.stringify(payload)); // Copy the object so that it can be modified predictably
+
+				for (let otpParameter of payload.otp_parameters)
+					otpParameter.secret = base32Encode(base64ToUint8Array(otpParameter.secret));
+
+				console.log("Payload", payload);
+				document.getElementById("output").innerText = JSON.stringify(payload, null, 2);
+			}
+		</script>
+	</body>
+</html>
